@@ -1,4 +1,4 @@
-import { createSafeFetch, safeFetch } from '../re-fetch';
+import { createSafeFetch, safeFetch } from '../index';
 import { isError, isSuccess } from './type-guards';
 
 const mockFetch = jest.fn();

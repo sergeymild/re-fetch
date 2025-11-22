@@ -1,4 +1,4 @@
-import type { SafeResult, NormalizedError } from '../re-fetch';
+import type { SafeResult, NormalizedError } from '../index';
 
 export function isError<T>(
   r: SafeResult<T>

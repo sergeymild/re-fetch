@@ -1,0 +1,14 @@
+src/
+node_modules/
+.git/
+.idea/
+.claude/
+build/
+*.log
+.DS_Store
+tsconfig.json
+.gitignore
+yarn.lock
+package-lock.json
+jest.setup.ts
+.npmignore
