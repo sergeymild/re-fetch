@@ -456,5 +456,167 @@ describe('safe-fetch', () => {
         expect(res.error.message).toBe('Validation failed');
       }
     });
+
+    it('caches with stale-while-revalidate', async () => {
+      const onValue = jest.fn();
+
+      // Первый запрос - создается кеш
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'fresh-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch();
+      const res1 = await api.get<{ data: string }>('/users', {
+        cached: {
+          cacheTime: 5000,
+          onValue
+        }
+      });
+
+      expect(onValue).not.toHaveBeenCalled(); // Кеша еще нет
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res1.ok).toBe(true);
+      if (isSuccess(res1)) {
+        expect(res1.data.data).toBe('fresh-1');
+      }
+
+      // Второй запрос - используется кеш + ревалидация
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'fresh-2' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const res2 = await api.get<{ data: string }>('/users', {
+        cached: {
+          cacheTime: 5000,
+          onValue
+        }
+      });
+
+      expect(onValue).toHaveBeenCalledTimes(1); // Вызван с кешированными данными
+      expect(onValue).toHaveBeenCalledWith({ data: 'fresh-1' }); // Старые данные из кеша
+      expect(mockFetch).toHaveBeenCalledTimes(2); // Сделан новый запрос
+      expect(res2.ok).toBe(true);
+      if (isSuccess(res2)) {
+        expect(res2.data.data).toBe('fresh-2'); // Но возвращены свежие данные
+      }
+
+      // Третий запрос - снова используется обновленный кеш
+      onValue.mockClear();
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'fresh-3' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const res3 = await api.get<{ data: string }>('/users', {
+        cached: {
+          cacheTime: 5000,
+          onValue
+        }
+      });
+
+      expect(onValue).toHaveBeenCalledTimes(1);
+      expect(onValue).toHaveBeenCalledWith({ data: 'fresh-2' }); // Данные из предыдущего запроса
+      expect(res3.ok).toBe(true);
+      if (isSuccess(res3)) {
+        expect(res3.data.data).toBe('fresh-3'); // Новые свежие данные
+      }
+    });
+
+    it('does not use expired cache', async () => {
+      jest.useFakeTimers();
+      const onValue = jest.fn();
+
+      // Первый запрос - создается кеш
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'old-data' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch();
+      const res1 = await api.get<{ data: string }>('/users', {
+        cached: {
+          cacheTime: 1000, // 1 секунда
+          onValue
+        }
+      });
+
+      expect(res1.ok).toBe(true);
+      if (isSuccess(res1)) {
+        expect(res1.data.data).toBe('old-data');
+      }
+      expect(onValue).not.toHaveBeenCalled();
+
+      // Прошло 2 секунды - кеш протух
+      jest.advanceTimersByTime(2000);
+
+      // Второй запрос - кеш протух, должны получить только свежие данные
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'new-data' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const res2 = await api.get<{ data: string }>('/users', {
+        cached: {
+          cacheTime: 1000,
+          onValue
+        }
+      });
+
+      expect(onValue).not.toHaveBeenCalled(); // Кеш протух, onValue не вызывается
+      expect(mockFetch).toHaveBeenCalledTimes(2); // Сделан новый запрос
+      expect(res2.ok).toBe(true);
+      if (isSuccess(res2)) {
+        expect(res2.data.data).toBe('new-data'); // Только свежие данные
+      }
+
+      jest.useRealTimers();
+    });
+
+    it('does not cache without cached option', async () => {
+      // Первый запрос
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'first' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch();
+      const res1 = await api.get<{ data: string }>('/users');
+
+      expect(res1.ok).toBe(true);
+      if (isSuccess(res1)) {
+        expect(res1.data.data).toBe('first');
+      }
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Второй запрос - должен сделать новый fetch, не использовать кеш
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'second' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const res2 = await api.get<{ data: string }>('/users');
+
+      expect(mockFetch).toHaveBeenCalledTimes(2); // Новый запрос, кеш не используется
+      expect(res2.ok).toBe(true);
+      if (isSuccess(res2)) {
+        expect(res2.data.data).toBe('second'); // Новые данные с сервера
+      }
+    });
   });
 });

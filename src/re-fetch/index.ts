@@ -14,10 +14,17 @@ import { httpError, networkError, timeoutError, validationError, isNormalizedErr
 export * from './types';
 export * from './errors';
 
+interface CacheEntry<T> {
+  data: T;
+  response: Response;
+  timestamp: number;
+}
+
 export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
   const defaultParseAs: ParseAs = base.parseAs ?? 'json';
 
   let refreshPromise: Promise<void> | null = null;
+  const cache = new Map<string, CacheEntry<any>>();
 
   async function core<TOut = unknown>(
     url: string,
@@ -30,6 +37,23 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
     const query = { ...(base.query ?? {}), ...(init.query ?? {}) };
     const targetUrl = buildURL(base.baseURL, url, query);
     const retries = init.retries ?? false;
+
+    if (init.cached) {
+      const cacheKey = `${method}:${targetUrl}`;
+      const cachedEntry = cache.get(cacheKey);
+
+      if (cachedEntry) {
+        const now = Date.now();
+        const cacheTime = init.cached.cacheTime ?? Infinity;
+        const isValid = (now - cachedEntry.timestamp) < cacheTime;
+
+        if (isValid) {
+          init.cached.onValue?.(cachedEntry.data);
+        } else {
+          cache.delete(cacheKey);
+        }
+      }
+    }
 
     const perAttemptTimeout = init.timeoutMs ?? base.timeoutMs ?? 0;
     const totalTimeout = init.totalTimeoutMs ?? base.totalTimeoutMs ?? 0;
@@ -180,7 +204,26 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
             await base.interceptors?.onError?.(mapped);
             return { ok: false, error: mapped, response: res };
           }
+
+          if (init.cached) {
+            const cacheKey = `${method}:${targetUrl}`;
+            cache.set(cacheKey, {
+              data: result.data,
+              response: res,
+              timestamp: Date.now()
+            });
+          }
+
           return { ok: true, data: result.data, response: res };
+        }
+
+        if (init.cached) {
+          const cacheKey = `${method}:${targetUrl}`;
+          cache.set(cacheKey, {
+            data: parsed as TOut,
+            response: res,
+            timestamp: Date.now()
+          });
         }
 
         return { ok: true, data: parsed as TOut, response: res };

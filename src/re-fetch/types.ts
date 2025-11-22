@@ -77,6 +77,11 @@ export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'meth
   timeoutMs?: number;
   totalTimeoutMs?: number;
   retries?: RetryStrategy;
+  cached?: {
+    // in mills
+    cacheTime?: number
+    onValue: (value: TOut | undefined) => void
+  }
 }
 
 export interface SafeFetcher {
