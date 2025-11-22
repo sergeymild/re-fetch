@@ -147,6 +147,46 @@ describe('safe-fetch', () => {
   });
 
   describe('retries', () => {
+    it('adds Authentication request', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({
+        authentication: () => {
+          return {'Authentication': `Bearer token`}
+        }
+      });
+      const res = await api.get('/test');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'Authentication': 'Bearer token'
+          })
+        })
+      );
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls authentication on retry', async () => {
+      const authSpy = jest.fn().mockReturnValue({ 'Authentication': 'Bearer token' });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({
+        authentication: authSpy
+      });
+      const res = await api.get('/test', { retries: { times: 2 } });
+
+      expect(authSpy).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res.ok).toBe(true);
+    });
+
     it('retries GET on 500 error', async () => {
       mockFetch
         .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))

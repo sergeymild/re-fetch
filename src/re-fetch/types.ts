@@ -63,6 +63,7 @@ export interface SafeFetchBaseConfig {
   parseAs?: ParseAs;
   errorMap?: ErrorMapper;
   interceptors?: Interceptors;
+  authentication?: () => Record<string, string> | Promise<Record<string, string>>;
 }
 
 export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'method'> {

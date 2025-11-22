@@ -72,6 +72,12 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           ...(base.headers ?? {}),
           ...((init.headers as any) ?? {}),
         };
+
+        if (base.authentication) {
+          const authHeaders = await base.authentication();
+          Object.assign(reqHeadersObj, authHeaders);
+        }
+
         const reqInit: RequestInit = { method, headers: reqHeadersObj };
 
         if (attemptController?.signal) {
