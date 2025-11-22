@@ -38,7 +38,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
     const targetUrl = buildURL(base.baseURL, url, query);
     const retries = init.retries ?? false;
 
-    if (init.cached) {
+    if (init.cached && !isRefreshRetry) {
       const cacheKey = `${method}:${targetUrl}`;
       const cachedEntry = cache.get(cacheKey);
 
