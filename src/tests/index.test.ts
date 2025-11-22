@@ -152,21 +152,11 @@ describe('safe-fetch', () => {
         .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
         .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
 
-      const api = createSafeFetch({ retries: { retries: 2 } });
-      const res = await api.get('/test');
+      const api = createSafeFetch();
+      const res = await api.get('/test', { retries: { times: 2 } });
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(res.ok).toBe(true);
-    });
-
-    it('does not retry POST by default', async () => {
-      mockFetch.mockResolvedValueOnce(new Response('Server Error', { status: 500 }));
-
-      const api = createSafeFetch({ retries: { retries: 2 } });
-      const res = await api.post('/test', { data: 'test' });
-
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(res.ok).toBe(false);
     });
 
     it('retries POST when retryOn allows it', async () => {
@@ -174,13 +164,26 @@ describe('safe-fetch', () => {
         .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
         .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
 
-      const api = createSafeFetch({
+      const api = createSafeFetch();
+      const res = await api.post('/test', { data: 'test' }, {
         retries: {
-          retries: 2,
+          times: 2,
           retryOn: (ctx: any) => ctx.response?.status === 500
         }
       });
-      const res = await api.post('/test', { data: 'test' });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res.ok).toBe(true);
+    });
+
+    it('retries in method', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({});
+      const res = await api.post('/test', { data: 'test' }, { retries: { times: 2 } });
+      console.log('[IndexTest.]', res.response?.status)
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(res.ok).toBe(true);
@@ -194,8 +197,8 @@ describe('safe-fetch', () => {
         }))
         .mockResolvedValueOnce(new Response('{"ok": true}', { status: 200 }));
 
-      const api = createSafeFetch({ retries: { retries: 2, baseDelayMs: 0 } });
-      const res = await api.get('/rate');
+      const api = createSafeFetch();
+      const res = await api.get('/rate', { retries: { times: 2, baseDelayMs: 0 } });
 
       expect(res.ok).toBe(true);
       expect(mockFetch).toHaveBeenCalledTimes(2);

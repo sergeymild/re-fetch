@@ -26,7 +26,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
     const parseAs = init.parseAs ?? defaultParseAs;
     const query = { ...(base.query ?? {}), ...(init.query ?? {}) };
     const targetUrl = buildURL(base.baseURL, url, query);
-    const retries = init.retries ?? base.retries ?? false;
+    const retries = init.retries ?? false;
 
     const perAttemptTimeout = init.timeoutMs ?? base.timeoutMs ?? 0;
     const totalTimeout = init.totalTimeoutMs ?? base.totalTimeoutMs ?? 0;
@@ -125,7 +125,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
 
         if (!res.ok) {
           const err = httpError(res, parsed);
-          if (retries && shouldRetry(retries, attempt, method, { response: res })) {
+          if (retries && shouldRetry(retries, attempt, { response: res })) {
             let delay = backoffDelay(attempt, retries);
             if (res.status === 429) {
               const ra = parseRetryAfter(res);
@@ -160,7 +160,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
               : networkError(e)))
           : networkError(e);
 
-        if (retries && shouldRetry(retries, attempt, method, { error: baseErr })) {
+        if (retries && shouldRetry(retries, attempt, { error: baseErr })) {
           await sleep(backoffDelay(attempt, retries));
           return attemptFetch(attempt + 1);
         }
@@ -175,16 +175,10 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
     const shouldRetry = (
       cfg: Exclude<RetryStrategy, false>,
       attempt: number,
-      method: string,
       ctx: any
     ) => {
-      if (attempt >= cfg.retries) return false;
+      if (attempt >= cfg.times) return false;
       if (cfg.retryOn) return !!cfg.retryOn({ attempt, ...ctx });
-
-      const isIdempotent = method === 'GET' || method === 'HEAD';
-      if (!isIdempotent) {
-        return false;
-      }
 
       const res: Response | undefined = ctx.response;
       const err: NormalizedError | undefined = ctx.error;

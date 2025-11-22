@@ -4,7 +4,7 @@ export type ParseAs = 'json' | 'text' | 'blob' | 'arrayBuffer' | 'response';
 export type RetryStrategy =
   | false
   | {
-  retries: number;           // e.g. 2
+  times: number;           // e.g. 2
   baseDelayMs?: number;      // e.g. 300
   maxDelayMs?: number;       // optional cap
   retryOn?: (ctx: { attempt: number; error?: unknown; response?: Response }) => boolean;
@@ -60,7 +60,6 @@ export interface SafeFetchBaseConfig {
   query?: Record<string, string | number | boolean | undefined>;
   timeoutMs?: number;
   totalTimeoutMs?: number;
-  retries?: RetryStrategy;
   parseAs?: ParseAs;
   errorMap?: ErrorMapper;
   interceptors?: Interceptors;
