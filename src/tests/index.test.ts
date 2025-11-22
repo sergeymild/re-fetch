@@ -274,6 +274,148 @@ describe('safe-fetch', () => {
     });
   });
 
+  describe('token refresh', () => {
+    it('refreshes token on 401 and retries request', async () => {
+      let token = 'old-token';
+      const refreshToken = jest.fn().mockImplementation(async () => {
+        token = 'new-token';
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': `Bearer ${token}` }),
+        refreshToken
+      });
+
+      const res = await api.get('/protected');
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, expect.any(String), expect.objectContaining({
+        headers: expect.objectContaining({ 'Authorization': 'Bearer old-token' })
+      }));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({
+        headers: expect.objectContaining({ 'Authorization': 'Bearer new-token' })
+      }));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls refreshToken only once for concurrent requests', async () => {
+      let token = 'old-token';
+      const refreshToken = jest.fn().mockImplementation(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        token = 'new-token';
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('{"data": 1}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }))
+        .mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }))
+        .mockResolvedValueOnce(new Response('{"data": 2}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{"data": 3}', { status: 200 }));
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': `Bearer ${token}` }),
+        refreshToken
+      });
+
+      const [res1, res2, res3] = await Promise.all([
+        api.get('/endpoint1'),
+        api.get('/endpoint2'),
+        api.get('/endpoint3')
+      ]);
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(5);
+      expect(res1.ok).toBe(true);
+      expect(res2.ok).toBe(true);
+      expect(res3.ok).toBe(true);
+      if (res1.ok && res2.ok && res3.ok) {
+        expect(res1.data).toEqual({ data: 1 });
+        expect(res2.data).toEqual({ data: 2 });
+        expect(res3.data).toEqual({ data: 3 });
+      }
+    });
+
+    it('uses custom shouldRefreshToken function', async () => {
+      let token = 'old-token';
+      const refreshToken = jest.fn().mockImplementation(async () => {
+        token = 'new-token';
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Token expired', { status: 403 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': `Bearer ${token}` }),
+        refreshToken,
+        shouldRefreshToken: (res) => res.status === 403
+      });
+
+      const res = await api.get('/protected');
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res.ok).toBe(true);
+    });
+
+    it('shouldRefreshToken skips auth endpoints', async () => {
+      const refreshToken = jest.fn().mockImplementation(async () => {});
+
+      mockFetch.mockImplementationOnce((url) => {
+        return Promise.resolve(
+          Object.assign(new Response('Unauthorized', { status: 401 }), { url })
+        );
+      });
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+        authentication: () => ({ 'Authorization': 'Bearer token' }),
+        refreshToken,
+        shouldRefreshToken: (res) => {
+          const url = res.url;
+          return res.status === 401 && !url.includes('/auth/code/');
+        }
+      });
+
+      const res = await api.get('/auth/code/verify');
+
+      expect(refreshToken).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(401);
+      }
+    });
+
+    it('does not retry after failed token refresh', async () => {
+      const refreshToken = jest.fn().mockRejectedValue(new Error('Refresh failed'));
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }));
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': 'Bearer token' }),
+        refreshToken
+      });
+
+      const res = await api.get('/protected');
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(401);
+      }
+    });
+  });
+
   describe('validation', () => {
     it('validates response with success', async () => {
       mockFetch.mockResolvedValueOnce(

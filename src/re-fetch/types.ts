@@ -64,6 +64,8 @@ export interface SafeFetchBaseConfig {
   errorMap?: ErrorMapper;
   interceptors?: Interceptors;
   authentication?: () => Record<string, string> | Promise<Record<string, string>>;
+  refreshToken?: () => Promise<void>;
+  shouldRefreshToken?: (response: Response) => boolean;
 }
 
 export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'method'> {

@@ -17,9 +17,12 @@ export * from './errors';
 export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
   const defaultParseAs: ParseAs = base.parseAs ?? 'json';
 
+  let refreshPromise: Promise<void> | null = null;
+
   async function core<TOut = unknown>(
     url: string,
-    init: SafeFetchRequest<TOut> = {}
+    init: SafeFetchRequest<TOut> = {},
+    isRefreshRetry: boolean = false
   ): Promise<SafeResult<TOut>> {
     let totalTimedOut = false;
     const method = (init.method ?? 'GET').toUpperCase() as HttpMethod;
@@ -130,6 +133,31 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
         const parsed = await parseBody(res, parseAs);
 
         if (!res.ok) {
+          const shouldRefresh = base.refreshToken && !isRefreshRetry &&
+            (base.shouldRefreshToken ? base.shouldRefreshToken(res) : res.status === 401);
+
+          if (shouldRefresh) {
+            if (refreshPromise) {
+              await refreshPromise;
+            } else {
+              refreshPromise = base.refreshToken!()
+                .finally(() => {
+                  refreshPromise = null;
+                });
+
+              try {
+                await refreshPromise;
+              } catch (refreshError) {
+                const err = httpError(res, parsed);
+                const mapped = mapError(err);
+                await base.interceptors?.onError?.(mapped);
+                return { ok: false, error: mapped, response: res };
+              }
+            }
+
+            return core(url, init, true);
+          }
+
           const err = httpError(res, parsed);
           if (retries && shouldRetry(retries, attempt, { response: res })) {
             let delay = backoffDelay(attempt, retries);
