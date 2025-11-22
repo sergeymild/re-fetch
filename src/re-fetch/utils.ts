@@ -3,7 +3,9 @@ import type { ParseAs, RetryStrategy } from './types';
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const buildURL = (base: string | undefined, path: string, q?: Record<string, any>) => {
-  const url = new URL(path, base ?? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost'));
+  const url = path.startsWith('http://') || path.startsWith('https://')
+    ? new URL(path)
+    : new URL(path, base ?? 'http://localhost');
   if (q) {
     Object.entries(q).forEach(([k, v]) => {
       if (v !== undefined) url.searchParams.set(k, String(v));
