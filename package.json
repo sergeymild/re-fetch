@@ -1,5 +1,5 @@
 {
-  "name": "@sergeigolishnikov/re-fetch",
+  "name": "re-fetch",
   "version": "1.0.0",
   "description": "Type-safe fetch wrapper with retries, timeouts, caching, and error handling. Works in browser, Node.js, and React Native.",
   "main": "dist/index.js",
