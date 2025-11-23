@@ -6,7 +6,7 @@
  * 2. Во втором терминале: npx ts-node examples/client.ts
  */
 
-import { createSafeFetch } from '../src/index';
+import {createSafeFetch, toTypedHttpError} from '../src/index';
 
 let currentToken = 'valid-token';
 

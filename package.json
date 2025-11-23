@@ -14,7 +14,8 @@
     "prepublishOnly": "npm run build",
     "example:server": "node examples/server.js",
     "example:client": "ts-node examples/client.ts",
-    "example:public-api": "ts-node examples/public-api.ts"
+    "example:public-api": "ts-node examples/public-api.ts",
+    "example:typed-errors": "ts-node examples/typed-errors.ts"
   },
   "keywords": [
     "fetch",

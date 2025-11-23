@@ -32,17 +32,9 @@ export interface HttpError extends NormalizedErrorBase {
   body?: unknown;
 }
 
-export interface ValidationError extends NormalizedErrorBase {
-  name: 'ValidationError';
-}
-
-export type NormalizedError = NetworkError | TimeoutError | HttpError | ValidationError;
+export type NormalizedError = NetworkError | TimeoutError | HttpError;
 
 export type ErrorMapper = (error: NormalizedError) => NormalizedError;
-
-export type ValidateResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: NormalizedError | unknown };
 
 export interface Interceptors {
   onRequest?: (input: RequestInfo, init: RequestInit & { url: string }) => Promise<void> | void;
@@ -73,7 +65,6 @@ export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'meth
   body?: BodyInit | object | null;
   query?: Record<string, string | number | boolean | undefined>;
   parseAs?: ParseAs;
-  validate?: (raw: unknown) => ValidateResult<TOut>;
   timeoutMs?: number;
   totalTimeoutMs?: number;
   retries?: RetryStrategy;

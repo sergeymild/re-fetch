@@ -7,12 +7,14 @@ Type-safe fetch wrapper with retries, timeouts, caching, and comprehensive error
 - ✅ **Type-safe** - Full TypeScript support with generics
 - 🔄 **Auto-retry** - Configurable retry strategies with exponential backoff
 - ⏱️ **Timeouts** - Per-request and total timeouts
-- 💾 **Caching** - Built-in request caching with TTL
-- 🔐 **Authentication** - Token refresh handling
-- 🎯 **Validation** - Response validation with custom validators
+- 💾 **Caching** - Built-in request caching with TTL and stale-while-revalidate
+- 🔄 **Long Polling** - Built-in support for long polling with automatic token refresh
+- 🔐 **Authentication** - Token refresh handling with concurrent request deduplication
+- 🎯 **Typed Errors** - Type-safe error handling with typed HTTP error bodies
 - 📱 **React Native** - No browser dependencies (no `window` usage)
-- 🛡️ **Error handling** - Normalized error types (HttpError, NetworkError, TimeoutError, ValidationError)
+- 🛡️ **Error handling** - Normalized error types (HttpError, NetworkError, TimeoutError)
 - 🔌 **Interceptors** - Request/response/error interceptors
+- 🗺️ **Error Mapping** - Transform errors globally with errorMap
 
 ## Installation
 
@@ -184,6 +186,75 @@ const api = createSafeFetch({
 });
 ```
 
+### Long Polling
+
+Built-in support for long polling with automatic cache bypass and token refresh:
+
+```typescript
+const controller = new AbortController();
+
+// Poll for updates every 5 seconds
+const result = await api.get<Data>('/status', {
+  longPooling: {
+    abort: controller.signal,
+    interval: 5000, // Poll every 5 seconds
+    onUpdated: (data) => {
+      console.log('Updated data:', data);
+      // Update your UI here
+    }
+  }
+});
+
+// First result is returned immediately
+if (result.ok) {
+  console.log('Initial data:', result.data);
+}
+
+// Stop polling when done
+setTimeout(() => controller.abort(), 60000);
+```
+
+**Features:**
+- ✅ First request returns immediately with cached data (if available)
+- ✅ Subsequent polls bypass cache for fresh data
+- ✅ Automatic token refresh on 401 errors
+- ✅ Clean cancellation with AbortController
+
+### Typed Error Handling
+
+Type-safe error body handling with generic type guards:
+
+```typescript
+import { toTypedHttpError, isHttpError } from 're-fetch';
+
+interface ValidationError {
+  errors: {
+    email: string[];
+    password: string[];
+  };
+}
+
+const result = await api.post('/register', userData);
+
+if (!result.ok) {
+  // Type-safe error body access
+  const validationError = toTypedHttpError<ValidationError>(result.error);
+
+  if (validationError && validationError.status === 422) {
+    // TypeScript knows the exact type of body
+    console.log('Email errors:', validationError.body.errors.email);
+    console.log('Password errors:', validationError.body.errors.password);
+  }
+}
+```
+
+**Available Guards:**
+- `isHttpError(error)` - Check if error is HttpError
+- `isNetworkError(error)` - Check if error is NetworkError
+- `isTimeoutError(error)` - Check if error is TimeoutError
+- `toTypedHttpError<T>(error)` - Safe cast to HttpError with typed body
+- `asHttpError<T>(error)` - Assert cast to HttpError (throws if not)
+
 ## Error Types
 
 All errors are normalized into these types:
@@ -193,7 +264,6 @@ type NormalizedError =
   | NetworkError      // Network failures
   | TimeoutError      // Request timeouts
   | HttpError         // HTTP errors (4xx, 5xx)
-  | ValidationError;  // Validation failures
 ```
 
 ### Error Properties
@@ -208,8 +278,6 @@ type NormalizedError =
 // HttpError
 { name: 'HttpError', message: string, status: number, statusText: string, body?: unknown }
 
-// ValidationError
-{ name: 'ValidationError', message: string, cause?: unknown }
 ```
 
 ## API Reference
@@ -244,18 +312,33 @@ api.patch<T>(url, body?, init?): Promise<SafeResult<T>>
 api.delete<T>(url, init?): Promise<SafeResult<T>>
 ```
 
-### `unwrap(promise)`
+**Request Options:**
+- `method?: HttpMethod` - HTTP method
+- `body?: BodyInit | object` - Request body
+- `headers?: Record<string, string>` - Request headers
+- `query?: Record<string, string | number | boolean>` - Query parameters
+- `parseAs?: ParseAs` - Response parser
+- `timeoutMs?: number` - Per-attempt timeout
+- `totalTimeoutMs?: number` - Total timeout including retries
+- `retries?: RetryStrategy` - Retry configuration
+- `cached?: CacheConfig` - Cache configuration
+- `longPooling?: LongPollingConfig` - Long polling configuration
+- Plus all standard `RequestInit` options
 
-Unwraps a SafeResult, throwing the error if not ok:
-
+**Long Polling Config:**
 ```typescript
-import { unwrap } from 're-fetch';
+{
+  abort: AbortSignal;      // Signal to stop polling
+  interval: number;        // Poll interval in milliseconds
+  onUpdated: (data: T) => void;  // Callback for updates
+}
+```
 
-try {
-  const data = await unwrap(api.get('/users'));
-  console.log(data);
-} catch (error) {
-  console.error(error);
+**Cache Config:**
+```typescript
+{
+  cacheTime?: number;      // Cache duration in milliseconds
+  onValue?: (data: T) => void;   // Callback when cache is hit
 }
 ```
 

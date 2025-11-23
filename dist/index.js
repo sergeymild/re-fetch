@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.unwrap = exports.safeFetch = void 0;
+exports.safeFetch = void 0;
 exports.createSafeFetch = createSafeFetch;
 const utils_1 = require("./utils");
 const errors_1 = require("./errors");
@@ -181,23 +181,6 @@ function createSafeFetch(base = {}) {
                     await base.interceptors?.onError?.(mapped);
                     return { ok: false, error: mapped, response: res };
                 }
-                if (init.validate) {
-                    const result = init.validate(parsed);
-                    if (!result.success) {
-                        const mapped = mapError((0, errors_1.validationError)(result.error));
-                        await base.interceptors?.onError?.(mapped);
-                        return { ok: false, error: mapped, response: res };
-                    }
-                    if (init.cached) {
-                        const cacheKey = `${method}:${targetUrl}`;
-                        cache.set(cacheKey, {
-                            data: result.data,
-                            response: res,
-                            timestamp: Date.now()
-                        });
-                    }
-                    return { ok: true, data: result.data, response: res };
-                }
                 if (init.cached) {
                     const cacheKey = `${method}:${targetUrl}`;
                     cache.set(cacheKey, {
@@ -295,10 +278,3 @@ function createSafeFetch(base = {}) {
     return api;
 }
 exports.safeFetch = createSafeFetch();
-const unwrap = async (promise) => {
-    const result = await promise;
-    if (!result.ok)
-        throw result.error;
-    return result.data;
-};
-exports.unwrap = unwrap;

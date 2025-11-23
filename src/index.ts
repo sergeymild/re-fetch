@@ -9,7 +9,7 @@ import {
   type HttpMethod
 } from './types';
 import { backoffDelay, buildURL, parseBody, toBodyInit, sleep, parseRetryAfter } from './utils';
-import { httpError, networkError, timeoutError, validationError, isNormalizedError } from './errors';
+import { httpError, networkError, timeoutError, isNormalizedError } from './errors';
 
 export * from './types';
 export * from './errors';
@@ -197,25 +197,6 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           return { ok: false, error: mapped, response: res };
         }
 
-        if (init.validate) {
-          const result = init.validate(parsed);
-          if (!result.success) {
-            const mapped = mapError(validationError(result.error));
-            await base.interceptors?.onError?.(mapped);
-            return { ok: false, error: mapped, response: res };
-          }
-
-          if (init.cached) {
-            const cacheKey = `${method}:${targetUrl}`;
-            cache.set(cacheKey, {
-              data: result.data,
-              response: res,
-              timestamp: Date.now()
-            });
-          }
-
-          return { ok: true, data: result.data, response: res };
-        }
 
         if (init.cached) {
           const cacheKey = `${method}:${targetUrl}`;
@@ -282,7 +263,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
       // Start long polling in background if configured
       if (init.longPooling && result.ok) {
         const polling = init.longPooling;
-        const pollingInit = {
+        const pollingInit: SafeFetchRequest<TOut> = {
           ...init,
           cached: undefined, // Ignore cache for polling requests
           longPooling: undefined // Prevent recursive polling
@@ -294,7 +275,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
             await sleep(polling.interval);
             if (polling.abort.aborted) break;
 
-            const pollResult = await core(url, pollingInit, isRefreshRetry);
+            const pollResult = await core<TOut>(url, pollingInit, isRefreshRetry);
             if (pollResult.ok) {
               polling.onUpdated(pollResult.data);
             }
@@ -321,9 +302,3 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
 }
 
 export const safeFetch = createSafeFetch();
-
-export const unwrap = async <T>(promise: Promise<SafeResult<T>>): Promise<T> => {
-  const result = await promise;
-  if (!result.ok) throw result.error;
-  return result.data;
-};
