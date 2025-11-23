@@ -272,6 +272,257 @@ describe('safe-fetch', () => {
       expect(httpRes.ok).toBe(false);
       if (isError(httpRes)) expect(httpRes.error.name).toBe('HttpError');
     });
+
+    it('transforms errors with errorMap', async () => {
+      mockFetch.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
+
+      const api = createSafeFetch({
+        errorMap: (error) => {
+          if (error.name === 'HttpError' && (error as any).status === 404) {
+            return {
+              name: 'HttpError',
+              message: 'Custom 404 message: Resource not found',
+              status: 404,
+              statusText: 'Not Found'
+            } as any;
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/missing');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('HttpError');
+        expect(res.error.message).toBe('Custom 404 message: Resource not found');
+      }
+    });
+
+    it('transforms network errors with errorMap', async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      const api = createSafeFetch({
+        errorMap: (error) => {
+          if (error.name === 'NetworkError') {
+            return {
+              name: 'NetworkError',
+              message: 'Custom network error: Please check your connection',
+              cause: error.cause
+            };
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/test');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+        expect(res.error.message).toBe('Custom network error: Please check your connection');
+      }
+    });
+
+    it('transforms timeout errors with errorMap', async () => {
+      mockFetch.mockImplementation(() => new Promise((resolve) => {
+        setTimeout(() => resolve(new Response('too slow', { status: 200 })), 100);
+      }));
+
+      const api = createSafeFetch({
+        totalTimeoutMs: 10,
+        errorMap: (error) => {
+          if (error.name === 'TimeoutError') {
+            return {
+              name: 'TimeoutError',
+              message: 'Request timeout: Server took too long to respond',
+              timeoutMs: (error as any).timeoutMs,
+              cause: error.cause
+            } as any;
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/slow');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('TimeoutError');
+        expect(res.error.message).toBe('Request timeout: Server took too long to respond');
+      }
+    });
+
+    it('transforms validation errors with errorMap', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response('{"invalid": true}', { status: 200 })
+      );
+
+      const validate = (data: any) => {
+        if (data && typeof data.id === 'number') {
+          return { success: true as const, data };
+        }
+        return { success: false as const, error: new Error('Missing id field') };
+      };
+
+      const api = createSafeFetch({
+        errorMap: (error) => {
+          if (error.name === 'ValidationError') {
+            return {
+              name: 'ValidationError',
+              message: 'Data validation failed: Invalid response format',
+              cause: error.cause
+            };
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/user', { validate });
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('ValidationError');
+        expect(res.error.message).toBe('Data validation failed: Invalid response format');
+      }
+    });
+
+    it('handles errorMap exceptions gracefully', async () => {
+      mockFetch.mockResolvedValueOnce(new Response('Server Error', { status: 500 }));
+
+      const api = createSafeFetch({
+        errorMap: (_error) => {
+          throw new Error('errorMap crashed!');
+        }
+      });
+
+      const res = await api.get('/test');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        // Should return original error when errorMap throws
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(500);
+      }
+    });
+
+    it('handles invalid errorMap return value', async () => {
+      mockFetch.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
+
+      const api = createSafeFetch({
+        errorMap: (_error) => {
+          // Return invalid value (not a NormalizedError)
+          return { invalid: 'object' } as any;
+        }
+      });
+
+      const res = await api.get('/test');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        // Should return original error when errorMap returns invalid value
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(404);
+      }
+    });
+
+    it('applies errorMap with retries', async () => {
+      let callCount = 0;
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }));
+
+      const api = createSafeFetch({
+        errorMap: (error) => {
+          callCount++;
+          if (error.name === 'HttpError' && (error as any).status === 500) {
+            return {
+              name: 'HttpError',
+              message: `Custom server error (call ${callCount})`,
+              status: 500,
+              statusText: 'Internal Server Error'
+            } as any;
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/test', { retries: { times: 2 } });
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('HttpError');
+        // errorMap is called only once with final error result
+        expect(res.error.message).toContain('Custom server error');
+      }
+      expect(callCount).toBeGreaterThanOrEqual(1); // Called at least once
+    });
+
+    it('applies errorMap during token refresh', async () => {
+      let token = 'old-token';
+      const refreshToken = jest.fn().mockRejectedValue(new Error('Refresh failed'));
+
+      mockFetch.mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }));
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': `Bearer ${token}` }),
+        refreshToken,
+        errorMap: (error) => {
+          if (error.name === 'HttpError' && (error as any).status === 401) {
+            return {
+              name: 'HttpError',
+              message: 'Authentication failed: Please log in again',
+              status: 401,
+              statusText: 'Unauthorized'
+            } as any;
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/protected');
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('HttpError');
+        expect(res.error.message).toBe('Authentication failed: Please log in again');
+      }
+    });
+
+    it('applies errorMap to multiple different error types in sequence', async () => {
+      const errorLog: string[] = [];
+
+      const api = createSafeFetch({
+        totalTimeoutMs: 10,
+        errorMap: (error) => {
+          errorLog.push(error.name);
+          return {
+            ...error,
+            message: `Transformed: ${error.message}`
+          };
+        }
+      });
+
+      // Network error
+      mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+      const res1 = await api.get('/test1');
+      expect(res1.ok).toBe(false);
+      if (isError(res1)) {
+        expect(res1.error.message).toContain('Transformed:');
+      }
+
+      // HTTP error
+      mockFetch.mockResolvedValueOnce(new Response('Not found', { status: 404 }));
+      const res2 = await api.get('/test2');
+      expect(res2.ok).toBe(false);
+      if (isError(res2)) {
+        expect(res2.error.message).toContain('Transformed:');
+      }
+
+      // Timeout error
+      mockFetch.mockImplementation(() => new Promise((resolve) => {
+        setTimeout(() => resolve(new Response('too slow', { status: 200 })), 100);
+      }));
+      const res3 = await api.get('/test3');
+      expect(res3.ok).toBe(false);
+      if (isError(res3)) {
+        expect(res3.error.message).toContain('Transformed:');
+      }
+
+      expect(errorLog).toEqual(['NetworkError', 'HttpError', 'TimeoutError']);
+    });
   });
 
   describe('token refresh', () => {
@@ -798,6 +1049,208 @@ describe('safe-fetch', () => {
       if (isSuccess(res2)) {
         expect(res2.data.data).toBe('success');
       }
+    });
+
+    it('is should long pool', async () => {
+      jest.useFakeTimers();
+      const onUpdated = jest.fn();
+
+      // First request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'initial' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch();
+      const controller = new AbortController();
+
+      const resultPromise = api.get<{ data: string }>('/users', {
+        longPooling: {
+          abort: controller.signal,
+          interval: 500,
+          onUpdated
+        }
+      });
+
+      // First request should complete immediately
+      const res = await resultPromise;
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.data).toBe('initial');
+      }
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(onUpdated).not.toHaveBeenCalled(); // Not called yet
+
+      // Setup second polling request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      // Advance time to trigger first poll
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(onUpdated).toHaveBeenCalledTimes(1);
+      expect(onUpdated).toHaveBeenNthCalledWith(1, { data: 'poll-1' });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Setup third polling request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-2' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      // Advance time to trigger second poll
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(onUpdated).toHaveBeenCalledTimes(2);
+      expect(onUpdated).toHaveBeenNthCalledWith(2, { data: 'poll-2' });
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+
+      // Stop polling
+      controller.abort();
+      jest.useRealTimers();
+    });
+
+    it('refreshes token during long polling when 401 occurs', async () => {
+      jest.useFakeTimers();
+      let token = 'old-token';
+      const onUpdated = jest.fn();
+      const refreshToken = jest.fn().mockImplementation(async () => {
+        token = 'new-token';
+      });
+
+      // First request - successful
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'initial' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch({
+        authentication: () => ({ 'Authorization': `Bearer ${token}` }),
+        refreshToken
+      });
+      const controller = new AbortController();
+
+      const resultPromise = api.get<{ data: string }>('/protected', {
+        longPooling: {
+          abort: controller.signal,
+          interval: 500,
+          onUpdated
+        }
+      });
+
+      // First request completes
+      const res = await resultPromise;
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.data).toBe('initial');
+      }
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(refreshToken).not.toHaveBeenCalled();
+
+      // First poll - token expired (401), then refresh, then success
+      mockFetch
+        .mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: 'after-refresh' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          })
+        );
+
+      // Advance time to trigger first poll
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(refreshToken).toHaveBeenCalledTimes(1);
+      expect(onUpdated).toHaveBeenCalledTimes(1);
+      expect(onUpdated).toHaveBeenNthCalledWith(1, { data: 'after-refresh' });
+      expect(mockFetch).toHaveBeenCalledTimes(3); // initial + 401 + retry with new token
+
+      // Second poll - successful with new token
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-2' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      // Advance time to trigger second poll
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(onUpdated).toHaveBeenCalledTimes(2);
+      expect(onUpdated).toHaveBeenNthCalledWith(2, { data: 'poll-2' });
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      expect(refreshToken).toHaveBeenCalledTimes(1); // Still only once
+
+      // Stop polling
+      controller.abort();
+      jest.useRealTimers();
+    });
+
+    it('stops long polling when aborted', async () => {
+      jest.useFakeTimers();
+      const onUpdated = jest.fn();
+
+      // First request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'initial' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      const api = createSafeFetch();
+      const controller = new AbortController();
+
+      const resultPromise = api.get<{ data: string }>('/users', {
+        longPooling: {
+          abort: controller.signal,
+          interval: 500,
+          onUpdated
+        }
+      });
+
+      // First request completes
+      const res = await resultPromise;
+      expect(res.ok).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // Setup first polling request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      );
+
+      // Advance time to trigger first poll
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(onUpdated).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      // Abort polling
+      controller.abort();
+
+      // Advance time - should NOT trigger more polls
+      await jest.advanceTimersByTimeAsync(500);
+      await jest.advanceTimersByTimeAsync(500);
+      await jest.advanceTimersByTimeAsync(500);
+
+      // No more calls should have been made
+      expect(onUpdated).toHaveBeenCalledTimes(1); // Still 1
+      expect(mockFetch).toHaveBeenCalledTimes(2); // Still 2
+
+      jest.useRealTimers();
     });
   });
 });

@@ -278,6 +278,30 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
 
     try {
       const result = await attemptFetch(1);
+
+      // Start long polling in background if configured
+      if (init.longPooling && result.ok) {
+        const polling = init.longPooling;
+        const pollingInit = {
+          ...init,
+          cached: undefined, // Ignore cache for polling requests
+          longPooling: undefined // Prevent recursive polling
+        };
+
+        // Fire-and-forget background polling
+        (async () => {
+          while (!polling.abort.aborted) {
+            await sleep(polling.interval);
+            if (polling.abort.aborted) break;
+
+            const pollResult = await core(url, pollingInit, isRefreshRetry);
+            if (pollResult.ok) {
+              polling.onUpdated(pollResult.data);
+            }
+          }
+        })();
+      }
+
       return result;
     } finally {
       if (totalTimeoutTimer) {

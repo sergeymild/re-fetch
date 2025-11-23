@@ -82,6 +82,11 @@ export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'meth
         cacheTime?: number;
         onValue: (value: TOut | undefined) => void;
     };
+    longPooling?: {
+        abort: AbortSignal;
+        interval: number;
+        onUpdated: (value: TOut | undefined) => void;
+    };
 }
 export interface SafeFetcher {
     <TOut = unknown>(url: string, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
