@@ -258,6 +258,167 @@ describe('safe-fetch', () => {
         expect(res.error.message).toContain('timed out after 10 ms');
       }
     });
+
+    it('retries on successful response when retryOn returns true', async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'pending' }), { status: 200 })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'pending' }), { status: 200 })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: 'ready', data: 'result' }), { status: 200 })
+        );
+
+      const api = createSafeFetch();
+      const res = await api.get<{ status: string; data?: string }>('/task', {
+        retries: {
+          times: 5,
+          baseDelayMs: 0,
+          retryOn: ({ data }) => (data as { status: string } | undefined)?.status === 'pending'
+        }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.status).toBe('ready');
+        expect(res.data.data).toBe('result');
+      }
+    });
+
+    it('retries on 200 based on response body content', async () => {
+      const retryOn = jest.fn()
+        .mockReturnValueOnce(true)  // First call - retry
+        .mockReturnValueOnce(true)  // Second call - retry
+        .mockReturnValueOnce(false); // Third call - don't retry
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ready: false }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ready: false }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ready: true }), { status: 200 }));
+
+      const api = createSafeFetch();
+      const res = await api.get('/poll', {
+        retries: {
+          times: 5,
+          baseDelayMs: 0,
+          retryOn
+        }
+      });
+
+      expect(retryOn).toHaveBeenCalledTimes(3);
+      expect(retryOn).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        attempt: 1,
+        response: expect.any(Response),
+        data: { ready: false }
+      }));
+      expect(retryOn).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        attempt: 2,
+        data: { ready: false }
+      }));
+      expect(retryOn).toHaveBeenNthCalledWith(3, expect.objectContaining({
+        attempt: 3,
+        data: { ready: true }
+      }));
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(res.ok).toBe(true);
+    });
+
+    it('stops retrying on 200 when max attempts reached', async () => {
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }));
+
+      const api = createSafeFetch();
+      const res = await api.get<{ status: string }>('/task', {
+        retries: {
+          times: 3,
+          baseDelayMs: 0,
+          retryOn: ({ data }) => (data as { status: string } | undefined)?.status === 'pending'
+        }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.status).toBe('pending'); // Returns last response
+      }
+    });
+
+    it('does not retry on 200 without retryOn function', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'pending' }), { status: 200 })
+      );
+
+      const api = createSafeFetch();
+      const res = await api.get<{ status: string }>('/task', {
+        retries: {
+          times: 3,
+          baseDelayMs: 0
+        }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.status).toBe('pending');
+      }
+    });
+
+    it('caches only final successful response after retry on 200', async () => {
+      const onValue = jest.fn();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ready' }), { status: 200 }));
+
+      const api = createSafeFetch();
+      const res1 = await api.get<{ status: string }>('/task', {
+        retries: {
+          times: 3,
+          baseDelayMs: 0,
+          retryOn: ({ data }) => (data as { status: string } | undefined)?.status === 'pending'
+        },
+        cached: {
+          cacheTime: 5000,
+          onValue
+        }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res1.ok).toBe(true);
+      if (isSuccess(res1)) {
+        expect(res1.data.status).toBe('ready');
+      }
+      expect(onValue).not.toHaveBeenCalled(); // No cache yet
+
+      // Second request - should use cache with final 'ready' status
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: 'new' }), { status: 200 })
+      );
+
+      const res2 = await api.get<{ status: string }>('/task', {
+        retries: {
+          times: 3,
+          baseDelayMs: 0,
+          retryOn: ({ data }) => (data as { status: string } | undefined)?.status === 'pending'
+        },
+        cached: {
+          cacheTime: 5000,
+          onValue
+        }
+      });
+
+      expect(onValue).toHaveBeenCalledTimes(1);
+      expect(onValue).toHaveBeenCalledWith({ status: 'ready' }); // Cached final result
+      expect(res2.ok).toBe(true);
+      if (isSuccess(res2)) {
+        expect(res2.data.status).toBe('new');
+      }
+    });
   });
 
   describe('error handling', () => {

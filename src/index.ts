@@ -197,6 +197,11 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           return { ok: false, error: mapped, response: res };
         }
 
+        // Retry on successful response if retryOn returns true
+        if (retries && retries.retryOn && shouldRetry(retries, attempt, { response: res, data: parsed })) {
+          await sleep(backoffDelay(attempt, retries));
+          return attemptFetch(attempt + 1);
+        }
 
         if (init.cached) {
           const cacheKey = `${method}:${targetUrl}`;

@@ -7,7 +7,7 @@ export type RetryStrategy =
   times: number;           // e.g. 2
   baseDelayMs?: number;      // e.g. 300
   maxDelayMs?: number;       // optional cap
-  retryOn?: (ctx: { attempt: number; error?: unknown; response?: Response }) => boolean;
+  retryOn?: (ctx: { attempt: number; error?: unknown; response?: Response; data?: unknown }) => boolean;
 };
 
 export interface NormalizedErrorBase {

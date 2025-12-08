@@ -1,6 +1,6 @@
 {
   "name": "re-fetch",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Type-safe fetch wrapper with retries, timeouts, caching, and error handling. Works in browser, Node.js, and React Native.",
   "main": "src/index.ts",
   "types": "src/index.ts",
