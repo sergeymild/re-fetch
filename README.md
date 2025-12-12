@@ -21,7 +21,7 @@ Type-safe fetch wrapper with retries, timeouts, caching, and comprehensive error
 ## Installation
 
 ```bash
-npm install re-fetch
+"re-fetch":"sergeymild/re-fetch#1.0.3"
 ```
 
 ## Quick Start
