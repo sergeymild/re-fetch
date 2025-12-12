@@ -6,12 +6,14 @@ Type-safe fetch wrapper with retries, timeouts, caching, and comprehensive error
 
 - ✅ **Type-safe** - Full TypeScript support with generics
 - 🔄 **Auto-retry** - Configurable retry strategies with exponential backoff
+- 🔄 **Retry on Success** - Retry based on response data (polling pattern)
 - ⏱️ **Timeouts** - Per-request and total timeouts
 - 💾 **Caching** - Built-in request caching with TTL and stale-while-revalidate
 - 🔄 **Long Polling** - Built-in support for long polling with automatic token refresh
 - 🔐 **Authentication** - Token refresh handling with concurrent request deduplication
 - 🎯 **Typed Errors** - Type-safe error handling with typed HTTP error bodies
 - 📱 **React Native** - No browser dependencies (no `window` usage)
+- 📶 **Network Check** - Pre-request network availability check
 - 🛡️ **Error handling** - Normalized error types (HttpError, NetworkError, TimeoutError)
 - 🔌 **Interceptors** - Request/response/error interceptors
 - 🗺️ **Error Mapping** - Transform errors globally with errorMap
@@ -96,6 +98,33 @@ const result = await api.get('/data', {
   }
 });
 ```
+
+### Retry on Success (Polling Pattern)
+
+You can retry requests even on successful responses. This is useful for polling scenarios where you need to wait for a specific condition:
+
+```typescript
+// Poll until task is ready
+const result = await api.get<{ status: string; data?: string }>('/task/123', {
+  retries: {
+    times: 10,
+    baseDelayMs: 1000,
+    retryOn: ({ data }) => {
+      // Keep retrying while status is 'pending'
+      return data?.status === 'pending';
+    }
+  }
+});
+
+if (result.ok && result.data.status === 'ready') {
+  console.log('Task completed:', result.data.data);
+}
+```
+
+This pattern is ideal for:
+- Waiting for async job completion
+- Polling for state changes
+- Server-side long-running operations
 
 ### Authentication with Token Refresh
 
@@ -220,6 +249,35 @@ setTimeout(() => controller.abort(), 60000);
 - ✅ Automatic token refresh on 401 errors
 - ✅ Clean cancellation with AbortController
 
+### Network Availability Check
+
+Check network availability before making requests. Useful for mobile apps (React Native) to prevent unnecessary requests when offline:
+
+```typescript
+import NetInfo from '@react-native-community/netinfo';
+
+const api = createSafeFetch({
+  baseURL: 'https://api.example.com',
+  checkNetworkAvailable: async () => {
+    const state = await NetInfo.fetch();
+    return state.isConnected ?? false;
+  }
+});
+
+// Request will fail immediately with NetworkError if offline
+const result = await api.get('/data');
+
+if (!result.ok && result.error.name === 'NetworkError') {
+  console.log('No internet connection');
+}
+```
+
+**Features:**
+- ✅ Called before every request
+- ✅ Returns `NetworkError` immediately if network unavailable
+- ✅ Prevents unnecessary network calls when offline
+- ✅ Works with `errorMap` and `onError` interceptor
+
 ### Typed Error Handling
 
 Type-safe error body handling with generic type guards:
@@ -298,6 +356,7 @@ Creates a new fetch client instance.
 - `authentication?: () => Record<string, string> | Promise<Record<string, string>>` - Auth headers provider
 - `refreshToken?: () => Promise<void>` - Token refresh handler
 - `shouldRefreshToken?: (response: Response) => boolean` - Refresh condition
+- `checkNetworkAvailable?: () => Promise<boolean>` - Network availability checker (useful for React Native)
 
 ### Request Methods
 

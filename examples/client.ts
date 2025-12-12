@@ -34,6 +34,13 @@ interface DataResponse {
   message: string;
 }
 
+interface TaskResponse {
+  status: 'pending' | 'ready';
+  attempt: number;
+  message?: string;
+  data?: { result: string };
+}
+
 async function testBasicRequest() {
   console.log('\n📡 Test 1: Basic request');
   console.log('========================');
@@ -148,10 +155,77 @@ async function testLongPollingWithCache() {
   console.log('✅ Stopped');
 }
 
+async function testRetryOnSuccess() {
+  console.log('\n📡 Test 4: Retry on success (polling pattern)');
+  console.log('==============================================');
+
+  // Сначала сбросим состояние задачи
+  await fetch('http://localhost:3000/task/reset', { method: 'POST' });
+  console.log('🔄 Task state reset');
+
+  const result = await api.get<TaskResponse>('/task', {
+    retries: {
+      times: 10,
+      baseDelayMs: 500,
+      retryOn: ({ response }) => {
+        console.log(`   [Network restyOnSuccess] ${response?.status}`);
+        return response?.status === 201
+      }
+    }
+  });
+
+  if (result.ok) {
+    if (result.data.status === 'ready') {
+      console.log('✅ Task completed!', result.data.data);
+    } else {
+      console.log('⚠️ Task still pending after all retries:', result.data);
+    }
+  } else {
+    console.error('❌ Error:', result.error);
+  }
+}
+
+async function testCheckNetworkAvailable() {
+  console.log('\n📡 Test 5: Check network availability (simulation)');
+  console.log('===================================================');
+
+  let networkAvailable = false;
+  let requestCount = 0;
+
+  // Создаем клиент с проверкой сети
+  const apiWithNetworkCheck = createSafeFetch({
+    baseURL: 'http://localhost:3000',
+    checkNetworkAvailable: async () => {
+      const status = networkAvailable ? '🟢 online' : '🔴 offline';
+      console.log(`   [Network check] ${status}`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      networkAvailable = true
+      console.log(`   [Network check] ${status}`);
+      return networkAvailable;
+    }
+  });
+
+  const result = await apiWithNetworkCheck.get('/network-check');
+
+  if (result.ok) {
+    console.log(`   ✅ Success: ${JSON.stringify(result.data)}`);
+  } else {
+    console.log(`   ❌ Blocked: ${result.error.name} - ${result.error.message}`);
+  }
+}
+
 // Запускаем тесты
 async function main() {
   try {
     await testBasicRequest();
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    await testRetryOnSuccess();
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    await testCheckNetworkAvailable();
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 

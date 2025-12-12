@@ -262,6 +262,17 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
       return e;
     };
 
+    // Check network availability before starting
+    if (base.checkNetworkAvailable) {
+      const isAvailable = await base.checkNetworkAvailable();
+      if (!isAvailable) {
+        const err = networkError(new Error('Network is not available'));
+        const mapped = mapError(err);
+        await base.interceptors?.onError?.(mapped);
+        return { ok: false, error: mapped };
+      }
+    }
+
     try {
       const result = await attemptFetch(1);
 

@@ -795,6 +795,153 @@ describe('safe-fetch', () => {
     });
   });
 
+  describe('checkNetworkAvailable', () => {
+    it('returns NetworkError when checkNetworkAvailable returns false', async () => {
+      const checkNetworkAvailable = jest.fn().mockResolvedValue(false);
+
+      const api = createSafeFetch({
+        checkNetworkAvailable
+      });
+
+      const res = await api.get('/test');
+
+      expect(checkNetworkAvailable).toHaveBeenCalledTimes(1);
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+        expect(res.error.message).toBe('Network request failed');
+      }
+    });
+
+    it('proceeds with request when checkNetworkAvailable returns true', async () => {
+      const checkNetworkAvailable = jest.fn().mockResolvedValue(true);
+
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'success' }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        checkNetworkAvailable
+      });
+
+      const res = await api.get('/test');
+
+      expect(checkNetworkAvailable).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data).toEqual({ data: 'success' });
+      }
+    });
+
+    it('calls onError interceptor when network is not available', async () => {
+      const onError = jest.fn();
+      const checkNetworkAvailable = jest.fn().mockResolvedValue(false);
+
+      const api = createSafeFetch({
+        checkNetworkAvailable,
+        interceptors: { onError }
+      });
+
+      const res = await api.get('/test');
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'NetworkError',
+        message: 'Network request failed'
+      }));
+      expect(res.ok).toBe(false);
+    });
+
+    it('applies errorMap when network is not available', async () => {
+      const checkNetworkAvailable = jest.fn().mockResolvedValue(false);
+
+      const api = createSafeFetch({
+        checkNetworkAvailable,
+        errorMap: (error) => {
+          if (error.name === 'NetworkError') {
+            return {
+              name: 'NetworkError',
+              message: 'Custom: No internet connection'
+            };
+          }
+          return error;
+        }
+      });
+
+      const res = await api.get('/test');
+
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+        expect(res.error.message).toBe('Custom: No internet connection');
+      }
+    });
+
+    it('checkNetworkAvailable is called for each request', async () => {
+      const checkNetworkAvailable = jest.fn()
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: 1 }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ data: 3 }), { status: 200 }));
+
+      const api = createSafeFetch({
+        checkNetworkAvailable
+      });
+
+      const res1 = await api.get('/test1');
+      expect(res1.ok).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      const res2 = await api.get('/test2');
+      expect(res2.ok).toBe(false);
+      if (isError(res2)) {
+        expect(res2.error.name).toBe('NetworkError');
+      }
+      expect(mockFetch).toHaveBeenCalledTimes(1); // Still 1, no new fetch
+
+      const res3 = await api.get('/test3');
+      expect(res3.ok).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      expect(checkNetworkAvailable).toHaveBeenCalledTimes(3);
+    });
+
+    it('works with POST and other methods', async () => {
+      const checkNetworkAvailable = jest.fn().mockResolvedValue(false);
+
+      const api = createSafeFetch({
+        checkNetworkAvailable
+      });
+
+      const res = await api.post('/test', { data: 'body' });
+
+      expect(checkNetworkAvailable).toHaveBeenCalledTimes(1);
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+      }
+    });
+
+    it('does not block request when checkNetworkAvailable is not provided', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'success' }), { status: 200 })
+      );
+
+      const api = createSafeFetch(); // No checkNetworkAvailable
+
+      const res = await api.get('/test');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(true);
+    });
+  });
+
   describe('validation', () => {
 
     it('caches with stale-while-revalidate', async () => {

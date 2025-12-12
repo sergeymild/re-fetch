@@ -9,6 +9,8 @@ const http = require('http');
 
 let counter = 0;
 let authToken = 'valid-token';
+let taskStatus = 'pending';
+let taskAttempts = 0;
 
 const server = http.createServer((req, res) => {
   // CORS headers
@@ -73,6 +75,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // GET /task - имитация долгой задачи (для тестирования retry on success)
+  // Возвращает 'pending' первые 3 запроса, потом 'ready'
+  if (url.pathname === '/task' && req.method === 'GET') {
+    taskAttempts++;
+
+    if (taskAttempts < 4) {
+      console.log(`[${new Date().toISOString()}] Task attempt #${taskAttempts}: pending`);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'pending',
+        attempt: taskAttempts,
+        message: 'Task is still processing...'
+      }));
+      return;
+    }
+
+    console.log(`[${new Date().toISOString()}] Task attempt #${taskAttempts}: ready`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ready',
+      attempt: taskAttempts,
+      data: { result: 'Task completed successfully!' }
+    }));
+    return;
+  }
+
+  // POST /task/reset - сброс состояния задачи
+  if (url.pathname === '/task/reset' && req.method === 'POST') {
+    taskAttempts = 0;
+    console.log(`[${new Date().toISOString()}] Task reset`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ message: 'Task reset' }));
+    return;
+  }
+
+  // GET /network-check - всегда возвращает 200 (для проверки доступности сети)
+  if (url.pathname === '/network-check' && req.method === 'GET') {
+    console.log(`[${new Date().toISOString()}] Network check: OK`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'online' }));
+    return;
+  }
+
   // 404
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
@@ -85,5 +130,9 @@ server.listen(PORT, () => {
   console.log('  GET  /data          - Returns incrementing counter data');
   console.log('  POST /refresh-token - Refreshes auth token');
   console.log('  GET  /random        - Returns random data');
-  console.log('\n💡 Every 5th request to /data will return 401 (token expired)\n');
+  console.log('  GET  /task          - Simulates long-running task (retry on success demo)');
+  console.log('  POST /task/reset    - Resets task state');
+  console.log('  GET  /network-check - Simple network availability check');
+  console.log('\n💡 Every 5th request to /data will return 401 (token expired)');
+  console.log('💡 /task returns "pending" 3 times, then "ready"\n');
 });
