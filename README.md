@@ -12,7 +12,7 @@ Type-safe fetch wrapper with retries, timeouts, caching, and comprehensive error
 - 🔄 **Long Polling** - Built-in support for long polling with automatic token refresh
 - 🔐 **Authentication** - Token refresh handling with concurrent request deduplication
 - 🎯 **Typed Errors** - Type-safe error handling with typed HTTP error bodies
-- 📱 **React Native** - No browser dependencies (no `window` usage)
+- 📱 **React Native** - No browser dependencies, includes DOMException polyfill for AbortController support
 - 📶 **Network Check** - Pre-request network availability check
 - 🛡️ **Error handling** - Normalized error types (HttpError, NetworkError, TimeoutError)
 - 🔌 **Interceptors** - Request/response/error interceptors
@@ -224,8 +224,8 @@ const controller = new AbortController();
 
 // Poll for updates every 5 seconds
 const result = await api.get<Data>('/status', {
+  signal: controller.signal, // Shared signal for cancellation
   longPooling: {
-    abort: controller.signal,
     interval: 5000, // Poll every 5 seconds
     onUpdated: (data) => {
       console.log('Updated data:', data);
@@ -247,7 +247,8 @@ setTimeout(() => controller.abort(), 60000);
 - ✅ First request returns immediately with cached data (if available)
 - ✅ Subsequent polls bypass cache for fresh data
 - ✅ Automatic token refresh on 401 errors
-- ✅ Clean cancellation with AbortController
+- ✅ Clean cancellation with AbortController (uses shared `signal`)
+- ✅ Retries stop immediately when abort signal is triggered
 
 ### Network Availability Check
 
@@ -387,11 +388,11 @@ api.delete<T>(url, init?): Promise<SafeResult<T>>
 **Long Polling Config:**
 ```typescript
 {
-  abort: AbortSignal;      // Signal to stop polling
   interval: number;        // Poll interval in milliseconds
   onUpdated: (data: T) => void;  // Callback for updates
 }
 ```
+Note: Use `signal` option in request to control cancellation (shared with main request).
 
 **Cache Config:**
 ```typescript
