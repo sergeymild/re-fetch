@@ -76,8 +76,7 @@ export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'meth
   }
 
   longPooling?: {
-    // in mills
-    abort: AbortSignal
+    // in ms
     interval: number
     onUpdated: (value: TOut | undefined) => void
   }

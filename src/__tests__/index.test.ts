@@ -1490,8 +1490,8 @@ describe('safe-fetch', () => {
       const controller = new AbortController();
 
       const resultPromise = api.get<{ data: string }>('/users', {
+        signal: controller.signal,
         longPooling: {
-          abort: controller.signal,
           interval: 500,
           onUpdated
         }
@@ -1564,8 +1564,8 @@ describe('safe-fetch', () => {
       const controller = new AbortController();
 
       const resultPromise = api.get<{ data: string }>('/protected', {
+        signal: controller.signal,
         longPooling: {
-          abort: controller.signal,
           interval: 500,
           onUpdated
         }
@@ -1635,8 +1635,8 @@ describe('safe-fetch', () => {
       const controller = new AbortController();
 
       const resultPromise = api.get<{ data: string }>('/users', {
+        signal: controller.signal,
         longPooling: {
-          abort: controller.signal,
           interval: 500,
           onUpdated
         }

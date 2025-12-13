@@ -284,11 +284,11 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           longPooling: undefined // Prevent recursive polling
         };
 
-        // Fire-and-forget background polling
+        // Fire-and-forget background polling (uses same signal as main request)
         (async () => {
-          while (!polling.abort.aborted) {
+          while (!isAborted()) {
             await sleep(polling.interval);
-            if (polling.abort.aborted) break;
+            if (isAborted()) break;
 
             const pollResult = await core<TOut>(url, pollingInit, isRefreshRetry);
             if (pollResult.ok) {
