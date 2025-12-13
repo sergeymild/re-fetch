@@ -6,7 +6,7 @@ global.fetch = mockFetch as any;
 
 describe('safe-fetch', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -939,6 +939,193 @@ describe('safe-fetch', () => {
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
       expect(res.ok).toBe(true);
+    });
+  });
+
+  describe('signal abort with retries', () => {
+    it('does not retry when signal is already aborted before request', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 3 }
+      });
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+      }
+    });
+
+    it('does not retry when signal is aborted during fetch (network error)', async () => {
+      const controller = new AbortController();
+
+      mockFetch.mockImplementation(() => {
+        controller.abort();
+        return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      });
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 3 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+      }
+    });
+
+    it('does not retry when signal is aborted after HTTP error response', async () => {
+      const controller = new AbortController();
+
+      mockFetch.mockImplementation(() => {
+        controller.abort();
+        return Promise.resolve(new Response('Server Error', { status: 500 }));
+      });
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 3 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(500);
+      }
+    });
+
+    it('does not retry when signal is aborted and retryOn would return true for success', async () => {
+      const controller = new AbortController();
+      const retryOn = jest.fn().mockReturnValue(true);
+
+      mockFetch.mockImplementation(() => {
+        controller.abort();
+        return Promise.resolve(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }));
+      });
+
+      const api = createSafeFetch();
+      const res = await api.get<{ status: string }>('/test', {
+        signal: controller.signal,
+        retries: {
+          times: 3,
+          retryOn
+        }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(retryOn).not.toHaveBeenCalled();
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.status).toBe('pending');
+      }
+    });
+
+    it('stops retrying when signal is aborted between retries on 500 error', async () => {
+      const controller = new AbortController();
+      let callCount = 0;
+
+      mockFetch.mockImplementation(() => {
+        callCount++;
+        if (callCount === 2) {
+          controller.abort();
+        }
+        return Promise.resolve(new Response('Server Error', { status: 500 }));
+      });
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 5, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('HttpError');
+        expect((res.error as any).status).toBe(500);
+      }
+    });
+
+    it('stops retrying when signal is aborted between retries on network error', async () => {
+      const controller = new AbortController();
+      let callCount = 0;
+
+      mockFetch.mockImplementation(() => {
+        callCount++;
+        if (callCount === 2) {
+          controller.abort();
+        }
+        return Promise.reject(new Error('Network failed'));
+      });
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 5, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(res.ok).toBe(false);
+      if (isError(res)) {
+        expect(res.error.name).toBe('NetworkError');
+      }
+    });
+
+    it('allows retries when signal is not aborted', async () => {
+      const controller = new AbortController();
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch();
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 3, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls onError interceptor when aborted before retry', async () => {
+      const controller = new AbortController();
+      const onError = jest.fn();
+
+      mockFetch.mockImplementation(() => {
+        controller.abort();
+        return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      });
+
+      const api = createSafeFetch({
+        interceptors: { onError }
+      });
+
+      const res = await api.get('/test', {
+        signal: controller.signal,
+        retries: { times: 3 }
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'NetworkError'
+      }));
+      expect(res.ok).toBe(false);
     });
   });
 

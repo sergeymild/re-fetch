@@ -8,6 +8,7 @@ export type RetryStrategy = false | {
         attempt: number;
         error?: unknown;
         response?: Response;
+        data?: unknown;
     }) => boolean;
 };
 export interface NormalizedErrorBase {
@@ -58,6 +59,7 @@ export interface SafeFetchBaseConfig {
     authentication?: () => Record<string, string> | Promise<Record<string, string>>;
     refreshToken?: () => Promise<void>;
     shouldRefreshToken?: (response: Response) => boolean;
+    checkNetworkAvailable?: () => Promise<boolean>;
 }
 export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'method'> {
     method?: HttpMethod;

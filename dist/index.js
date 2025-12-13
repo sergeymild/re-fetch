@@ -51,8 +51,7 @@ function createSafeFetch(base = {}) {
         const startedAt = totalTimeout ? Date.now() : 0;
         const exceededTotalTimeout = () => totalTimeout && (Date.now() - startedAt >= totalTimeout);
         const externalSignal = init.signal;
-        let aborted = false;
-        externalSignal?.addEventListener('abort', () => { aborted = true; });
+        const isAborted = () => externalSignal?.aborted ?? false;
         const overallController = totalTimeout ? new AbortController() : undefined;
         const totalTimeoutTimer = totalTimeout
             ? setTimeout(() => {
@@ -61,7 +60,7 @@ function createSafeFetch(base = {}) {
             }, totalTimeout)
             : undefined;
         const attemptFetch = async (attempt) => {
-            if (aborted) {
+            if (isAborted()) {
                 const mapped = mapError((0, errors_1.networkError)(new DOMException('Aborted', 'AbortError')));
                 await base.interceptors?.onError?.(mapped);
                 return { ok: false, error: mapped };
@@ -167,7 +166,7 @@ function createSafeFetch(base = {}) {
                         return core(url, init, true);
                     }
                     const err = (0, errors_1.httpError)(res, parsed);
-                    if (retries && shouldRetry(retries, attempt, { response: res })) {
+                    if (retries && !isAborted() && shouldRetry(retries, attempt, { response: res })) {
                         let delay = (0, utils_1.backoffDelay)(attempt, retries);
                         if (res.status === 429) {
                             const ra = (0, utils_1.parseRetryAfter)(res);
@@ -180,6 +179,11 @@ function createSafeFetch(base = {}) {
                     const mapped = mapError(err);
                     await base.interceptors?.onError?.(mapped);
                     return { ok: false, error: mapped, response: res };
+                }
+                // Retry on successful response if retryOn returns true
+                if (retries && !isAborted() && retries.retryOn && shouldRetry(retries, attempt, { response: res, data: parsed })) {
+                    await (0, utils_1.sleep)((0, utils_1.backoffDelay)(attempt, retries));
+                    return attemptFetch(attempt + 1);
                 }
                 if (init.cached) {
                     const cacheKey = `${method}:${targetUrl}`;
@@ -200,7 +204,7 @@ function createSafeFetch(base = {}) {
                             ? (0, errors_1.timeoutError)(perAttemptTimeout, e)
                             : (0, errors_1.networkError)(e)))
                     : (0, errors_1.networkError)(e);
-                if (retries && shouldRetry(retries, attempt, { error: baseErr })) {
+                if (retries && !isAborted() && shouldRetry(retries, attempt, { error: baseErr })) {
                     await (0, utils_1.sleep)((0, utils_1.backoffDelay)(attempt, retries));
                     return attemptFetch(attempt + 1);
                 }
@@ -238,6 +242,16 @@ function createSafeFetch(base = {}) {
             }
             return e;
         };
+        // Check network availability before starting
+        if (base.checkNetworkAvailable) {
+            const isAvailable = await base.checkNetworkAvailable();
+            if (!isAvailable) {
+                const err = (0, errors_1.networkError)(new Error('Network is not available'));
+                const mapped = mapError(err);
+                await base.interceptors?.onError?.(mapped);
+                return { ok: false, error: mapped };
+            }
+        }
         try {
             const result = await attemptFetch(1);
             // Start long polling in background if configured

@@ -61,8 +61,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
     const exceededTotalTimeout = () => totalTimeout && (Date.now() - startedAt >= totalTimeout);
 
     const externalSignal = init.signal;
-    let aborted = false;
-    externalSignal?.addEventListener('abort', () => { aborted = true; });
+    const isAborted = () => externalSignal?.aborted ?? false;
 
     const overallController = totalTimeout ? new AbortController() : undefined;
     const totalTimeoutTimer = totalTimeout
@@ -73,7 +72,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
       : undefined;
 
     const attemptFetch = async (attempt: number): Promise<SafeResult<TOut>> => {
-      if (aborted) {
+      if (isAborted()) {
         const mapped = mapError(networkError(new DOMException('Aborted', 'AbortError')));
         await base.interceptors?.onError?.(mapped);
         return { ok: false, error: mapped };
@@ -183,7 +182,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           }
 
           const err = httpError(res, parsed);
-          if (retries && shouldRetry(retries, attempt, { response: res })) {
+          if (retries && !isAborted() && shouldRetry(retries, attempt, { response: res })) {
             let delay = backoffDelay(attempt, retries);
             if (res.status === 429) {
               const ra = parseRetryAfter(res);
@@ -198,7 +197,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
         }
 
         // Retry on successful response if retryOn returns true
-        if (retries && retries.retryOn && shouldRetry(retries, attempt, { response: res, data: parsed })) {
+        if (retries && !isAborted() && retries.retryOn && shouldRetry(retries, attempt, { response: res, data: parsed })) {
           await sleep(backoffDelay(attempt, retries));
           return attemptFetch(attempt + 1);
         }
@@ -223,7 +222,7 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
               : networkError(e)))
           : networkError(e);
 
-        if (retries && shouldRetry(retries, attempt, { error: baseErr })) {
+        if (retries && !isAborted() && shouldRetry(retries, attempt, { error: baseErr })) {
           await sleep(backoffDelay(attempt, retries));
           return attemptFetch(attempt + 1);
         }
