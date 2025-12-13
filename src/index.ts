@@ -14,6 +14,17 @@ import { httpError, networkError, timeoutError, isNormalizedError } from './erro
 export * from './types';
 export * from './errors';
 
+// Polyfill for DOMException (needed for AbortController.abort() in React Native)
+if (typeof DOMException === 'undefined') {
+  // @ts-ignore
+  global.DOMException = class DOMException extends Error {
+    constructor(message: any, name: any) {
+      super(message)
+      this.name = name || 'DOMException'
+    }
+  }
+}
+
 interface CacheEntry<T> {
   data: T;
   response: Response;
