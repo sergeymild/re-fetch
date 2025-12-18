@@ -28,7 +28,7 @@ export interface TimeoutError extends NormalizedErrorBase {
 export interface HttpError extends NormalizedErrorBase {
   name: 'HttpError';
   status: number;
-  statusText: string;
+  url: string;
   body?: unknown;
 }
 

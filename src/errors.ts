@@ -17,7 +17,7 @@ export const httpError = (res: Response, body?: unknown): HttpError => ({
   name: 'HttpError',
   message: `HTTP ${res.status} ${res.statusText}`,
   status: res.status,
-  statusText: res.statusText,
+  url: res.url,
   body
 });
 
