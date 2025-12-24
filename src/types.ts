@@ -61,10 +61,14 @@ export interface SafeFetchBaseConfig {
   checkNetworkAvailable?: () => Promise<boolean>
 }
 
+export type QueryParams = Record<string, string | number | boolean | undefined>;
+export type QueryParamsOrFn = QueryParams | (() => QueryParams);
+export type UrlOrFn = string | (() => string);
+
 export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'method'> {
   method?: HttpMethod;
   body?: BodyInit | object | null;
-  query?: Record<string, string | number | boolean | undefined>;
+  query?: QueryParamsOrFn;
   parseAs?: ParseAs;
   timeoutMs?: number;
   totalTimeoutMs?: number;
@@ -83,11 +87,11 @@ export interface SafeFetchRequest<TOut> extends Omit<RequestInit, 'body' | 'meth
 }
 
 export interface SafeFetcher {
-  <TOut = unknown>(url: string, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  <TOut = unknown>(url: UrlOrFn, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
 
-  get<TOut = unknown>(url: string, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
-  post<TOut = unknown>(url: string, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
-  put<TOut = unknown>(url: string, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
-  patch<TOut = unknown>(url: string, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
-  delete<TOut = unknown>(url: string, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  get<TOut = unknown>(url: UrlOrFn, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  post<TOut = unknown>(url: UrlOrFn, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  put<TOut = unknown>(url: UrlOrFn, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  patch<TOut = unknown>(url: UrlOrFn, body?: unknown, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
+  delete<TOut = unknown>(url: UrlOrFn, init?: SafeFetchRequest<TOut>): Promise<SafeResult<TOut>>;
 }

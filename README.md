@@ -7,6 +7,7 @@ Type-safe fetch wrapper with retries, timeouts, caching, and comprehensive error
 - ✅ **Type-safe** - Full TypeScript support with generics
 - 🔄 **Auto-retry** - Configurable retry strategies with exponential backoff
 - 🔄 **Retry on Success** - Retry based on response data (polling pattern)
+- 🔀 **Dynamic URL/Query** - URL and query can be functions called on each attempt
 - ⏱️ **Timeouts** - Per-request and total timeouts
 - 💾 **Caching** - Built-in request caching with TTL and stale-while-revalidate
 - 🔄 **Long Polling** - Built-in support for long polling with automatic token refresh
@@ -125,6 +126,60 @@ This pattern is ideal for:
 - Waiting for async job completion
 - Polling for state changes
 - Server-side long-running operations
+
+### Dynamic URL and Query Parameters
+
+Both `url` and `query` can be functions that are called on each attempt. This is useful when you need different values for retries or polling:
+
+```typescript
+// Dynamic query - cursor changes on each retry
+let cursor = 0;
+const result = await api.get('/tasks', {
+  query: () => ({ cursor: cursor++ }),
+  retries: {
+    times: 5,
+    retryOn: ({ data }) => data?.status === 'pending'
+  }
+});
+// Request 1: /tasks?cursor=0
+// Request 2: /tasks?cursor=1
+// Request 3: /tasks?cursor=2
+```
+
+```typescript
+// Dynamic URL - version changes on each retry
+let version = 1;
+const result = await api.get(() => `/api/v${version++}/data`, {
+  retries: { times: 3 }
+});
+// Request 1: /api/v1/data
+// Request 2: /api/v2/data
+// Request 3: /api/v3/data
+```
+
+```typescript
+// Both dynamic URL and query with long polling
+let seq = 0;
+const controller = new AbortController();
+
+const result = await api.get(() => `/events/stream`, {
+  signal: controller.signal,
+  query: () => ({ since: seq }),
+  longPooling: {
+    interval: 3000,
+    onUpdated: (data) => {
+      seq = data.lastSeq; // Update sequence for next poll
+      console.log('New events:', data.events);
+    }
+  }
+});
+```
+
+**Key behaviors:**
+- Functions are called on each attempt (retries, polling iterations)
+- Static values work as before (backwards compatible)
+- Base query is merged with dynamic query on each attempt
+- Cache key is based on first resolved URL/query
 
 ### Authentication with Token Refresh
 
@@ -364,6 +419,7 @@ Creates a new fetch client instance.
 All methods return `Promise<SafeResult<T>>`:
 
 ```typescript
+// url can be string or () => string
 api<T>(url, init?): Promise<SafeResult<T>>
 api.get<T>(url, init?): Promise<SafeResult<T>>
 api.post<T>(url, body?, init?): Promise<SafeResult<T>>
@@ -372,11 +428,14 @@ api.patch<T>(url, body?, init?): Promise<SafeResult<T>>
 api.delete<T>(url, init?): Promise<SafeResult<T>>
 ```
 
+**URL Parameter:**
+- `url: string | (() => string)` - Static string or function returning string (called on each attempt)
+
 **Request Options:**
 - `method?: HttpMethod` - HTTP method
 - `body?: BodyInit | object` - Request body
 - `headers?: Record<string, string>` - Request headers
-- `query?: Record<string, string | number | boolean>` - Query parameters
+- `query?: QueryParams | (() => QueryParams)` - Query parameters (static object or function called on each attempt)
 - `parseAs?: ParseAs` - Response parser
 - `timeoutMs?: number` - Per-attempt timeout
 - `totalTimeoutMs?: number` - Total timeout including retries

@@ -1676,4 +1676,335 @@ describe('safe-fetch', () => {
       jest.useRealTimers();
     });
   });
+
+  describe('dynamic url and query', () => {
+    it('calls query function on each retry attempt', async () => {
+      let callCount = 0;
+      const queryFn = jest.fn(() => {
+        callCount++;
+        return { attempt: callCount };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get('/test', {
+        query: queryFn,
+        retries: { times: 3, baseDelayMs: 0 }
+      });
+
+      expect(queryFn).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/test?attempt=1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/test?attempt=2', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(3, 'https://api.example.com/test?attempt=3', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls url function on each retry attempt', async () => {
+      let callCount = 0;
+      const urlFn = jest.fn(() => {
+        callCount++;
+        return `/test/v${callCount}`;
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get(urlFn, {
+        retries: { times: 3, baseDelayMs: 0 }
+      });
+
+      expect(urlFn).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/test/v1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/test/v2', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(3, 'https://api.example.com/test/v3', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls both url and query functions on each retry', async () => {
+      let urlCallCount = 0;
+      let queryCallCount = 0;
+
+      const urlFn = jest.fn(() => {
+        urlCallCount++;
+        return `/endpoint/${urlCallCount}`;
+      });
+
+      const queryFn = jest.fn(() => {
+        queryCallCount++;
+        return { page: queryCallCount };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get(urlFn, {
+        query: queryFn,
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(urlFn).toHaveBeenCalledTimes(2);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/endpoint/1?page=1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/endpoint/2?page=2', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls query function on each retryOn success retry', async () => {
+      let callCount = 0;
+      const queryFn = jest.fn(() => {
+        callCount++;
+        return { cursor: `cursor-${callCount}` };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'pending' }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ready' }), { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get<{ status: string }>('/task', {
+        query: queryFn,
+        retries: {
+          times: 5,
+          baseDelayMs: 0,
+          retryOn: ({ data }) => (data as { status: string } | undefined)?.status === 'pending'
+        }
+      });
+
+      expect(queryFn).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/task?cursor=cursor-1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/task?cursor=cursor-2', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(3, 'https://api.example.com/task?cursor=cursor-3', expect.any(Object));
+      expect(res.ok).toBe(true);
+      if (isSuccess(res)) {
+        expect(res.data.status).toBe('ready');
+      }
+    });
+
+    it('calls url and query functions on each long polling iteration', async () => {
+      jest.useFakeTimers();
+      let urlCallCount = 0;
+      let queryCallCount = 0;
+      const onUpdated = jest.fn();
+
+      const urlFn = jest.fn(() => {
+        urlCallCount++;
+        return `/poll/v${urlCallCount}`;
+      });
+
+      const queryFn = jest.fn(() => {
+        queryCallCount++;
+        return { seq: queryCallCount };
+      });
+
+      // First request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'initial' }), { status: 200 })
+      );
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const controller = new AbortController();
+
+      const res = await api.get(urlFn, {
+        signal: controller.signal,
+        query: queryFn,
+        longPooling: {
+          interval: 500,
+          onUpdated
+        }
+      });
+
+      expect(res.ok).toBe(true);
+      expect(urlFn).toHaveBeenCalledTimes(1);
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/poll/v1?seq=1', expect.any(Object));
+
+      // Setup first polling request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-1' }), { status: 200 })
+      );
+
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(urlFn).toHaveBeenCalledTimes(2);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/poll/v2?seq=2', expect.any(Object));
+      expect(onUpdated).toHaveBeenCalledWith({ data: 'poll-1' });
+
+      // Setup second polling request
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'poll-2' }), { status: 200 })
+      );
+
+      await jest.advanceTimersByTimeAsync(500);
+
+      expect(urlFn).toHaveBeenCalledTimes(3);
+      expect(queryFn).toHaveBeenCalledTimes(3);
+      expect(mockFetch).toHaveBeenNthCalledWith(3, 'https://api.example.com/poll/v3?seq=3', expect.any(Object));
+      expect(onUpdated).toHaveBeenCalledWith({ data: 'poll-2' });
+
+      controller.abort();
+      jest.useRealTimers();
+    });
+
+    it('merges base query with dynamic query function', async () => {
+      let callCount = 0;
+      const queryFn = jest.fn(() => {
+        callCount++;
+        return { dynamic: callCount };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+        query: { static: 'value' }
+      });
+      const res = await api.get('/test', {
+        query: queryFn,
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/test?static=value&dynamic=1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/test?static=value&dynamic=2', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('works with static url and dynamic query', async () => {
+      let callCount = 0;
+      const queryFn = jest.fn(() => {
+        callCount++;
+        return { page: callCount };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get('/static-path', {
+        query: queryFn,
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/static-path?page=1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/static-path?page=2', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('works with dynamic url and static query', async () => {
+      let callCount = 0;
+      const urlFn = jest.fn(() => {
+        callCount++;
+        return `/resource/${callCount}`;
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get(urlFn, {
+        query: { static: 'param' },
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/resource/1?static=param', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/resource/2?static=param', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls query function once without retries', async () => {
+      const queryFn = jest.fn(() => ({ key: 'value' }));
+
+      mockFetch.mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get('/test', { query: queryFn });
+
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith('https://api.example.com/test?key=value', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('calls url function once without retries', async () => {
+      const urlFn = jest.fn(() => '/dynamic-path');
+
+      mockFetch.mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get(urlFn);
+
+      expect(urlFn).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith('https://api.example.com/dynamic-path', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('handles network error retry with dynamic query', async () => {
+      let callCount = 0;
+      const queryFn = jest.fn(() => {
+        callCount++;
+        return { retry: callCount };
+      });
+
+      mockFetch
+        .mockRejectedValueOnce(new Error('Network failed'))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.get('/test', {
+        query: queryFn,
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/test?retry=1', expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/test?retry=2', expect.any(Object));
+      expect(res.ok).toBe(true);
+    });
+
+    it('POST with dynamic url and query works correctly', async () => {
+      let urlCallCount = 0;
+      let queryCallCount = 0;
+
+      const urlFn = jest.fn(() => {
+        urlCallCount++;
+        return `/submit/${urlCallCount}`;
+      });
+
+      const queryFn = jest.fn(() => {
+        queryCallCount++;
+        return { attempt: queryCallCount };
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(new Response('Server Error', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{"success": true}', { status: 200 }));
+
+      const api = createSafeFetch({ baseURL: 'https://api.example.com' });
+      const res = await api.post(urlFn, { data: 'test' }, {
+        query: queryFn,
+        retries: { times: 2, baseDelayMs: 0 }
+      });
+
+      expect(urlFn).toHaveBeenCalledTimes(2);
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenNthCalledWith(1, 'https://api.example.com/submit/1?attempt=1', expect.objectContaining({ method: 'POST' }));
+      expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://api.example.com/submit/2?attempt=2', expect.objectContaining({ method: 'POST' }));
+      expect(res.ok).toBe(true);
+    });
+  });
 });

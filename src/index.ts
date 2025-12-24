@@ -6,7 +6,9 @@ import {
   type NormalizedError,
   type ParseAs,
   type RetryStrategy,
-  type HttpMethod
+  type HttpMethod,
+  type UrlOrFn,
+  type QueryParams
 } from './types';
 import { backoffDelay, buildURL, parseBody, toBodyInit, sleep, parseRetryAfter } from './utils';
 import { httpError, networkError, timeoutError, isNormalizedError } from './errors';
@@ -37,20 +39,29 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
   let refreshPromise: Promise<void> | null = null;
   const cache = new Map<string, CacheEntry<any>>();
 
+  const resolveUrl = (url: UrlOrFn): string => typeof url === 'function' ? url() : url;
+  const resolveQuery = (query: SafeFetchRequest<unknown>['query']): QueryParams =>
+    typeof query === 'function' ? query() : (query ?? {});
+
   async function core<TOut = unknown>(
-    url: string,
+    url: UrlOrFn,
     init: SafeFetchRequest<TOut> = {},
     isRefreshRetry: boolean = false
   ): Promise<SafeResult<TOut>> {
     let totalTimedOut = false;
     const method = (init.method ?? 'GET').toUpperCase() as HttpMethod;
     const parseAs = init.parseAs ?? defaultParseAs;
-    const query = { ...(base.query ?? {}), ...(init.query ?? {}) };
-    const targetUrl = buildURL(base.baseURL, url, query);
     const retries = init.retries ?? false;
 
+    // Track initial targetUrl for cache key (set on first attempt)
+    let cacheTargetUrl: string | undefined;
+
     if (init.cached && !isRefreshRetry) {
-      const cacheKey = `${method}:${targetUrl}`;
+      // For cache lookup, resolve once to get a stable cache key
+      const initialResolvedUrl = resolveUrl(url);
+      const initialQuery = { ...(base.query ?? {}), ...resolveQuery(init.query) };
+      cacheTargetUrl = buildURL(base.baseURL, initialResolvedUrl, initialQuery);
+      const cacheKey = `${method}:${cacheTargetUrl}`;
       const cachedEntry = cache.get(cacheKey);
 
       if (cachedEntry) {
@@ -105,6 +116,21 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
         : undefined;
 
       try {
+        // Resolve url and query on each attempt for dynamic values
+        // Use cached targetUrl on first attempt if available (from cache lookup)
+        let targetUrl: string;
+        if (attempt === 1 && cacheTargetUrl) {
+          targetUrl = cacheTargetUrl;
+        } else {
+          const resolvedUrl = resolveUrl(url);
+          const query = { ...(base.query ?? {}), ...resolveQuery(init.query) };
+          targetUrl = buildURL(base.baseURL, resolvedUrl, query);
+          // Set cacheTargetUrl on first attempt if not already set
+          if (attempt === 1 && !cacheTargetUrl) {
+            cacheTargetUrl = targetUrl;
+          }
+        }
+
         const reqHeadersObj: Record<string, string> = {
           ...(base.headers ?? {}),
           ...((init.headers as any) ?? {}),
@@ -213,8 +239,8 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
           return attemptFetch(attempt + 1);
         }
 
-        if (init.cached) {
-          const cacheKey = `${method}:${targetUrl}`;
+        if (init.cached && cacheTargetUrl) {
+          const cacheKey = `${method}:${cacheTargetUrl}`;
           cache.set(cacheKey, {
             data: parsed as TOut,
             response: res,
