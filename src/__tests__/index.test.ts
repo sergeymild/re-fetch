@@ -2007,4 +2007,105 @@ describe('safe-fetch', () => {
       expect(res.ok).toBe(true);
     });
   });
+
+  describe('FormData handling', () => {
+    it('removes Content-Type header when body is FormData', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 1 }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const formData = new FormData();
+      formData.append('file', new Blob(['test']), 'test.mp4');
+
+      await api.post('/upload', formData);
+
+      const calledInit = mockFetch.mock.calls[0][1];
+      const headers = calledInit.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBeUndefined();
+    });
+
+    it('removes Content-Type header regardless of case', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 1 }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const formData = new FormData();
+      formData.append('file', new Blob(['test']), 'test.mp4');
+
+      await api.post('/upload', formData);
+
+      const calledInit = mockFetch.mock.calls[0][1];
+      const headers = calledInit.headers as Record<string, string>;
+      expect(headers['content-type']).toBeUndefined();
+      expect(headers['Content-Type']).toBeUndefined();
+    });
+
+    it('keeps Content-Type for regular JSON body when base headers set it', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      await api.post('/data', { name: 'test' });
+
+      const calledInit = mockFetch.mock.calls[0][1];
+      const headers = calledInit.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBe('application/json');
+    });
+
+    it('does not add Content-Type when body is FormData and no base headers', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 1 }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+      });
+
+      const formData = new FormData();
+      formData.append('key', 'value');
+
+      await api.post('/upload', formData);
+
+      const calledInit = mockFetch.mock.calls[0][1];
+      const headers = calledInit.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBeUndefined();
+      expect(headers['content-type']).toBeUndefined();
+    });
+
+    it('removes Content-Type from init headers override for FormData', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 1 }), { status: 200 })
+      );
+
+      const api = createSafeFetch({
+        baseURL: 'https://api.example.com',
+      });
+
+      const formData = new FormData();
+      formData.append('file', new Blob(['test']), 'video.mp4');
+
+      await api.post('/upload', formData, {
+        headers: { 'Content-Type': 'application/json' } as any,
+      });
+
+      const calledInit = mockFetch.mock.calls[0][1];
+      const headers = calledInit.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBeUndefined();
+    });
+  });
 });

@@ -158,7 +158,12 @@ export function createSafeFetch(base: SafeFetchBaseConfig = {}): SafeFetcher {
 
         if (init.body !== undefined && method !== 'GET' && method !== 'HEAD') {
           reqInit.body = toBodyInit(init.body);
-          if (init.body && typeof init.body === 'object' && !(init.body instanceof FormData)) {
+          if (init.body instanceof FormData) {
+            // Remove Content-Type for FormData so fetch/RN can set multipart/form-data with correct boundary
+            const h = reqInit.headers as Record<string, string>;
+            const ctKey = Object.keys(h).find(k => k.toLowerCase() === 'content-type');
+            if (ctKey) delete h[ctKey];
+          } else if (init.body && typeof init.body === 'object') {
             const h = reqInit.headers as Record<string, string>;
             const hasCT = Object.keys(h).some(k => k.toLowerCase() === 'content-type');
             if (!hasCT) h['Content-Type'] = 'application/json';
